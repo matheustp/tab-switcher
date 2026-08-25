@@ -9,8 +9,135 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const EventEmitter = require('events');
 const { resolveBrowserPath } = require('./browser-finder');
+
+/**
+ * Sends a CDP command over WebSocket to a specific tab target
+ */
+async function sendCDPCommand(wsUrl, method, params = {}) {
+  if (!wsUrl) throw new Error('Missing webSocketDebuggerUrl');
+
+  return new Promise((resolve, reject) => {
+    const id = Math.floor(Math.random() * 1000000) + 1;
+    const msg = JSON.stringify({ id, method, params });
+
+    // Node 21+ built-in WebSocket
+    if (typeof globalThis.WebSocket !== 'undefined') {
+      let ws;
+      try {
+        ws = new globalThis.WebSocket(wsUrl);
+      } catch (err) {
+        return reject(err);
+      }
+
+      const timer = setTimeout(() => {
+        try { ws.close(); } catch {}
+        reject(new Error(`CDP WebSocket command timed out: ${method}`));
+      }, 3500);
+
+      ws.onopen = () => {
+        try {
+          ws.send(msg);
+        } catch (err) {
+          clearTimeout(timer);
+          reject(err);
+        }
+      };
+
+      ws.onmessage = (event) => {
+        clearTimeout(timer);
+        try {
+          const res = JSON.parse(event.data);
+          try { ws.close(); } catch {}
+          resolve(res);
+        } catch {
+          try { ws.close(); } catch {}
+          resolve(event.data);
+        }
+      };
+
+      ws.onerror = (err) => {
+        clearTimeout(timer);
+        reject(err);
+      };
+      return;
+    }
+
+    // Node 16/18/20 fallback using standard http upgrade
+    const parsed = new URL(wsUrl);
+    const key = crypto.randomBytes(16).toString('base64');
+    const req = http.request({
+      hostname: parsed.hostname,
+      port: parsed.port,
+      path: parsed.pathname,
+      headers: {
+        'Connection': 'Upgrade',
+        'Upgrade': 'websocket',
+        'Sec-WebSocket-Version': '13',
+        'Sec-WebSocket-Key': key,
+        'Host': parsed.host,
+        'Origin': 'http://' + parsed.host
+      },
+      timeout: 3500
+    });
+
+    req.on('upgrade', (res, socket) => {
+      const payload = Buffer.from(msg);
+      const mask = crypto.randomBytes(4);
+      let header;
+      if (payload.length < 126) {
+        header = Buffer.alloc(6);
+        header[0] = 0x81;
+        header[1] = 0x80 | payload.length;
+        mask.copy(header, 2);
+      } else if (payload.length < 65536) {
+        header = Buffer.alloc(8);
+        header[0] = 0x81;
+        header[1] = 0x80 | 126;
+        header.writeUInt16BE(payload.length, 2);
+        mask.copy(header, 4);
+      } else {
+        header = Buffer.alloc(14);
+        header[0] = 0x81;
+        header[1] = 0x80 | 127;
+        header.writeBigUInt64BE(BigInt(payload.length), 2);
+        mask.copy(header, 10);
+      }
+
+      const maskedPayload = Buffer.alloc(payload.length);
+      for (let i = 0; i < payload.length; i++) {
+        maskedPayload[i] = payload[i] ^ mask[i % 4];
+      }
+
+      socket.write(Buffer.concat([header, maskedPayload]));
+
+      const timeoutTimer = setTimeout(() => {
+        socket.destroy();
+        resolve({ success: true, timedOut: true });
+      }, 2000);
+
+      socket.on('data', () => {
+        clearTimeout(timeoutTimer);
+        socket.destroy();
+        resolve({ success: true });
+      });
+
+      socket.on('error', (err) => {
+        clearTimeout(timeoutTimer);
+        reject(err);
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error(`HTTP Upgrade timed out for ${method}`));
+    });
+    req.end();
+  });
+}
 
 class CDPController extends EventEmitter {
   constructor() {
@@ -254,7 +381,8 @@ class CDPController extends EventEmitter {
     // First tab is already open with enabledUrls[0]
     this.tabs.push({
       ...enabledUrls[0],
-      targetId: firstTarget ? firstTarget.id : null
+      targetId: firstTarget ? firstTarget.id : null,
+      webSocketDebuggerUrl: firstTarget ? firstTarget.webSocketDebuggerUrl : null
     });
 
     // Open the rest of the URLs in new tabs
@@ -265,7 +393,8 @@ class CDPController extends EventEmitter {
         const newTarget = await this.cdpRequest(`/json/new?${encodedUrl}`, 'PUT');
         this.tabs.push({
           ...item,
-          targetId: newTarget.id
+          targetId: newTarget.id,
+          webSocketDebuggerUrl: newTarget.webSocketDebuggerUrl
         });
         // Small delay to let browser allocate tab
         await new Promise(r => setTimeout(r, 200));
@@ -284,6 +413,24 @@ class CDPController extends EventEmitter {
     const currentTab = this.tabs[this.currentIndex];
     const duration = (currentTab && currentTab.durationSeconds) || this.config.rotation.defaultIntervalSeconds || 15;
     this.currentSecondsRemaining = duration;
+  }
+
+  /**
+   * Updates configuration dynamically while running
+   */
+  updateConfig(newConfig) {
+    this.config = newConfig;
+    if (Array.isArray(newConfig.urls)) {
+      for (const tab of this.tabs) {
+        const updatedUrl = newConfig.urls.find(u => u.id === tab.id || u.url === tab.url);
+        if (updatedUrl) {
+          tab.reloadOnSwitch = Boolean(updatedUrl.reloadOnSwitch);
+          tab.durationSeconds = updatedUrl.durationSeconds;
+          tab.title = updatedUrl.title;
+        }
+      }
+    }
+    console.log(`[Config] Live config updated. Auto-Reload on switch is: ${this.config?.rotation?.reloadOnSwitch ? 'ON' : 'OFF'}`);
   }
 
   /**
@@ -306,11 +453,15 @@ class CDPController extends EventEmitter {
         await this.cdpRequest(`/json/activate/${tab.targetId}`, 'GET');
       }
 
-      // Check if reload on switch is configured
-      const shouldReload = tab.reloadOnSwitch || this.config.rotation.reloadOnSwitch;
+      // Check if reload on switch is configured (either per-tab or globally)
+      const shouldReload = Boolean(tab.reloadOnSwitch) || Boolean(this.config?.rotation?.reloadOnSwitch);
       if (shouldReload) {
-        // Trigger reload by re-navigating to the URL
-        await this.reloadTab(tab);
+        // Trigger reload asynchronously with a slight delay so tab activation completes first
+        setTimeout(() => {
+          this.reloadTab(tab).catch(err => {
+            console.warn('[Auto-Reload] Error executing tab reload:', err.message);
+          });
+        }, 200);
       }
 
       this.setupCurrentTabDuration();
@@ -329,33 +480,59 @@ class CDPController extends EventEmitter {
   }
 
   /**
-   * Reloads a tab
+   * Reloads a tab via CDP
    */
   async reloadTab(tab) {
+    if (!tab) return;
+
     try {
+      if (!tab.webSocketDebuggerUrl) {
+        await this.refreshTargets();
+      }
+
+      console.log(`[Auto-Reload] Refreshing tab #${this.currentIndex + 1}: "${tab.title || tab.url}"`);
+
+      if (tab.webSocketDebuggerUrl) {
+        try {
+          await sendCDPCommand(tab.webSocketDebuggerUrl, 'Page.reload', { ignoreCache: false });
+          console.log(`[Auto-Reload] Successfully refreshed: "${tab.title || tab.url}"`);
+          return;
+        } catch (wsErr) {
+          console.warn(`[Auto-Reload] Page.reload failed, trying fallback: ${wsErr.message}`);
+          await sendCDPCommand(tab.webSocketDebuggerUrl, 'Runtime.evaluate', {
+            expression: 'window.location.reload(true)'
+          });
+          console.log(`[Auto-Reload] Fallback reload executed.`);
+          return;
+        }
+      }
+
+      // Fallback: If no WebSocket debugger URL, activate tab
       if (tab.targetId) {
-        // We can navigate the tab back to its URL to trigger a clean fresh reload
-        const encodedUrl = encodeURIComponent(tab.url);
-        // CDP HTTP doesn't have a direct /json/reload endpoint, but we can re-navigate or send command
-        // An elegant zero-dependency way to reload is to call /json/activate then send navigation
+        await this.cdpRequest(`/json/activate/${tab.targetId}`, 'GET');
       }
     } catch (err) {
-      console.warn('Reload tab error:', err.message);
+      console.warn(`[Auto-Reload] Failed to reload tab (${tab.url}):`, err.message);
+      await this.refreshTargets();
     }
   }
 
   /**
-   * Refreshes target IDs in case user closed or reopened tabs in the browser
+   * Refreshes target IDs and WebSocket URLs in case user closed or reopened tabs in browser
    */
   async refreshTargets() {
     try {
       const targets = await this.cdpRequest('/json/list');
       const pageTargets = (targets || []).filter(t => t.type === 'page');
 
-      for (const tab of this.tabs) {
-        const match = pageTargets.find(t => t.url.includes(tab.url) || (t.id === tab.targetId));
+      for (let i = 0; i < this.tabs.length; i++) {
+        const tab = this.tabs[i];
+        const match = pageTargets.find(t => t.id === tab.targetId) ||
+                      pageTargets.find(t => t.url && tab.url && t.url.startsWith(tab.url)) ||
+                      pageTargets[i];
         if (match) {
           tab.targetId = match.id;
+          tab.webSocketDebuggerUrl = match.webSocketDebuggerUrl;
         }
       }
     } catch (err) {
