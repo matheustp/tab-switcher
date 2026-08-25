@@ -1,18 +1,23 @@
 @echo off
-setlocal
-title Chrome ^& Edge Tab Rotator
+setlocal EnableDelayedExpansion
+
+:: Change current directory to script folder
+cd /d "%~dp0"
+
+title Chrome and Edge Tab Rotator
 
 echo ========================================================
-echo   Chrome ^& Edge Auto Tab Rotator (Windows)
+echo   Chrome and Edge Auto Tab Rotator
 echo ========================================================
 echo.
 
-:: Check if Node.js is installed
+:: Check if Node.js is available
 where node >nul 2>nul
-if %errorlevel% neq 0 (
-    echo [ERROR] Node.js is not found in your PATH!
-    echo Please install Node.js (v16 or newer) from https://nodejs.org
-    echo No admin rights are required to run once Node.js is installed.
+if errorlevel 1 (
+    echo [ERROR] Node.js was not found in PATH!
+    echo.
+    echo Please make sure Node.js is installed (https://nodejs.org).
+    echo If you just installed it, please close and reopen this window.
     echo.
     pause
     exit /b 1
@@ -24,11 +29,11 @@ echo.
 echo Starting Tab Rotator server...
 echo.
 
-:: Run Node server with any forwarded CLI arguments (e.g. --autostart, --profile=...)
+:: Run Node server with all passed arguments
 node server.js %*
 
-if %errorlevel% neq 0 (
-    echo.
-    echo Server stopped with error.
-    pause
-)
+echo.
+echo ========================================================
+echo Server has stopped.
+echo ========================================================
+pause
