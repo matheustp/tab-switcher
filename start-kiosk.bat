@@ -1,28 +1,23 @@
 @echo off
-setlocal EnableDelayedExpansion
-
-:: Change current directory to script folder
 cd /d "%~dp0"
-
-title Chrome and Edge Tab Rotator (Kiosk Mode)
+title Tab Rotator - Kiosk Mode
 
 echo ========================================================
-echo   Chrome and Edge Auto Tab Rotator (Kiosk Mode)
+echo   Chrome and Edge Auto Tab Rotator - Kiosk Mode
 echo ========================================================
 echo.
 
-where node >nul 2>nul
-if errorlevel 1 (
-    echo [ERROR] Node.js was not found in PATH!
-    echo.
-    echo Please make sure Node.js is installed (https://nodejs.org).
+node -v >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] Node.js is not found in your system PATH.
+    echo Please install Node.js from https://nodejs.org and try again.
     echo.
     pause
     exit /b 1
 )
 
 echo [OK] Node.js detected:
-node --version
+node -v
 echo.
 echo Starting Tab Rotator in Kiosk Mode...
 echo.
@@ -30,7 +25,5 @@ echo.
 node server.js --autostart --no-open %*
 
 echo.
-echo ========================================================
 echo Server has stopped.
-echo ========================================================
 pause
