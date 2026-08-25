@@ -351,7 +351,7 @@ function renderUrlList() {
       <div class="checkbox-row" style="margin: 0;">
         <label class="switch-label" title="Enable/Disable Tab">
           <input type="checkbox" class="tab-enable-chk" data-index="${index}" ${item.enabled ? 'checked' : ''}>
-          <span class="slider-switch" style="width: 32px; height: 18px;"></span>
+          <span class="slider-switch switch-sm"></span>
         </label>
       </div>
 
