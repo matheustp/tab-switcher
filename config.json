@@ -1,0 +1,31 @@
+{
+  "version": "1.0.0",
+  "browser": {
+    "type": "auto",
+    "customPath": "",
+    "windowMode": "maximized",
+    "profileMode": "isolated",
+    "customProfilePath": "",
+    "remoteDebuggingPort": 9222,
+    "disableWebSecurity": false,
+    "extraFlags": []
+  },
+  "rotation": {
+    "defaultIntervalSeconds": 45,
+    "order": "sequential",
+    "loop": true,
+    "reloadOnSwitch": false,
+    "reloadIntervalSeconds": 0,
+    "pauseOnHover": false
+  },
+  "urls": [
+    {
+      "id": "url_1787672256474_0",
+      "title": "Test",
+      "url": "https://test.dashboard.com",
+      "enabled": true,
+      "durationSeconds": null,
+      "reloadOnSwitch": false
+    }
+  ]
+}
