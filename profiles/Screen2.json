@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "browser": {
+    "type": "auto",
+    "customPath": "",
+    "windowMode": "maximized",
+    "windowPosition": "1920,0",
+    "windowSize": "auto",
+    "profileMode": "isolated",
+    "customProfilePath": "",
+    "remoteDebuggingPort": 9223,
+    "disableWebSecurity": false,
+    "extraFlags": []
+  },
+  "rotation": {
+    "defaultIntervalSeconds": 15,
+    "order": "sequential",
+    "loop": true,
+    "reloadOnSwitch": false,
+    "reloadIntervalSeconds": 0,
+    "pauseOnHover": false
+  },
+  "urls": [
+    {
+      "id": "s2_1",
+      "title": "Wikipedia Status",
+      "url": "https://en.wikipedia.org/wiki/Main_Page",
+      "enabled": true,
+      "durationSeconds": 20,
+      "reloadOnSwitch": false
+    },
+    {
+      "id": "s2_2",
+      "title": "GitHub Trending",
+      "url": "https://github.com/trending",
+      "enabled": true,
+      "durationSeconds": 20,
+      "reloadOnSwitch": true
+    }
+  ]
+}

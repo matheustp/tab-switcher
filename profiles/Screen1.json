@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "browser": {
+    "type": "auto",
+    "customPath": "",
+    "windowMode": "maximized",
+    "windowPosition": "0,0",
+    "windowSize": "auto",
+    "profileMode": "isolated",
+    "customProfilePath": "",
+    "remoteDebuggingPort": 9222,
+    "disableWebSecurity": false,
+    "extraFlags": []
+  },
+  "rotation": {
+    "defaultIntervalSeconds": 15,
+    "order": "sequential",
+    "loop": true,
+    "reloadOnSwitch": false,
+    "reloadIntervalSeconds": 0,
+    "pauseOnHover": false
+  },
+  "urls": [
+    {
+      "id": "s1_1",
+      "title": "Grafana Dashboard",
+      "url": "https://play.grafana.org",
+      "enabled": true,
+      "durationSeconds": 15,
+      "reloadOnSwitch": true
+    },
+    {
+      "id": "s1_2",
+      "title": "System Metrics",
+      "url": "https://news.ycombinator.com",
+      "enabled": true,
+      "durationSeconds": 15,
+      "reloadOnSwitch": false
+    }
+  ]
+}
