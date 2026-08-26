@@ -1,0 +1,39 @@
+{
+  "version": "1.0.0",
+  "browser": {
+    "type": "auto",
+    "customPath": "",
+    "windowMode": "maximized",
+    "profileMode": "isolated",
+    "customProfilePath": "",
+    "remoteDebuggingPort": 9222,
+    "disableWebSecurity": false,
+    "extraFlags": []
+  },
+  "rotation": {
+    "defaultIntervalSeconds": 45,
+    "order": "sequential",
+    "loop": true,
+    "reloadOnSwitch": true,
+    "reloadIntervalSeconds": 0,
+    "pauseOnHover": false
+  },
+  "urls": [
+    {
+      "id": "url_1787683544649_0",
+      "title": "Test",
+      "url": "https://uol.com.br",
+      "enabled": true,
+      "durationSeconds": 10,
+      "reloadOnSwitch": false
+    },
+    {
+      "id": "url_1787683571423",
+      "title": "New Dashboard",
+      "url": "https://google.com.br",
+      "enabled": true,
+      "durationSeconds": 5,
+      "reloadOnSwitch": false
+    }
+  ]
+}
