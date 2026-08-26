@@ -1,0 +1,25 @@
+{
+  "name": "chrome-edge-tab-rotator",
+  "version": "1.0.0",
+  "description": "Automated tab rotator for Google Chrome and Microsoft Edge on Windows with configurable URLs and timers",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/test-all.js"
+  },
+  "keywords": [
+    "chrome",
+    "edge",
+    "tab-rotator",
+    "kiosk",
+    "dashboard",
+    "automation",
+    "cdp",
+    "devtools"
+  ],
+  "author": "Antigravity",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

@@ -6,12 +6,34 @@
 
 const { spawn } = require('child_process');
 const http = require('http');
+const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const EventEmitter = require('events');
 const { resolveBrowserPath } = require('./browser-finder');
+
+/**
+ * Finds an available TCP port starting from the given port number
+ */
+function getAvailablePort(startingPort) {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(getAvailablePort(startingPort + 1));
+      } else {
+        reject(err);
+      }
+    });
+    srv.listen(startingPort, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
 
 /**
  * Sends a CDP command over WebSocket to a specific tab target
@@ -219,13 +241,16 @@ class CDPController extends EventEmitter {
   }
 
   /**
-   * Resolves or creates user data profile directory
+   * Resolves or creates user data profile directory (isolated per profile name)
    */
-  resolveProfileDir(config) {
+  resolveProfileDir(config, profileName = 'default') {
+    const safeProfile = (profileName || 'default').replace(/[^a-zA-Z0-9_\-]/g, '_');
+
     if (config.browser.profileMode === 'persistent') {
       const baseDir = config.browser.customProfilePath || path.join(
         process.env.LOCALAPPDATA || path.join(os.homedir(), '.chrome_rotator'),
-        'ChromeTabRotator_Profile'
+        'ChromeTabRotator_Profiles',
+        `Profile_${safeProfile}`
       );
       if (!fs.existsSync(baseDir)) {
         fs.mkdirSync(baseDir, { recursive: true });
@@ -233,8 +258,8 @@ class CDPController extends EventEmitter {
       this.profileDir = baseDir;
       this.isTempProfile = false;
     } else {
-      // Isolated temporary profile
-      const tempPath = fs.mkdtempSync(path.join(os.tmpdir(), 'tab_rotator_'));
+      // Isolated temporary profile uniquely named
+      const tempPath = fs.mkdtempSync(path.join(os.tmpdir(), `tab_rotator_${safeProfile}_`));
       this.profileDir = tempPath;
       this.isTempProfile = true;
     }
@@ -242,11 +267,12 @@ class CDPController extends EventEmitter {
   }
 
   /**
-   * Builds browser command line arguments
+   * Builds browser command line arguments (with auto-assigned debug port & monitor positioning)
    */
-  buildBrowserArgs(config) {
-    const profilePath = this.resolveProfileDir(config);
-    this.port = config.browser.remoteDebuggingPort || 9222;
+  async buildBrowserArgs(config, profileName = 'default') {
+    const profilePath = this.resolveProfileDir(config, profileName);
+    const basePort = config.browser.remoteDebuggingPort || 9222;
+    this.port = await getAvailablePort(basePort);
 
     const args = [
       `--remote-debugging-port=${this.port}`,
@@ -266,6 +292,16 @@ class CDPController extends EventEmitter {
     if (config.browser.disableWebSecurity) {
       args.push('--disable-web-security');
       args.push('--allow-running-insecure-content');
+    }
+
+    // Monitor / Window positioning
+    if (config.browser.windowPosition && config.browser.windowPosition !== 'auto') {
+      args.push(`--window-position=${config.browser.windowPosition}`);
+    }
+
+    // Window size
+    if (config.browser.windowSize && config.browser.windowSize !== 'auto') {
+      args.push(`--window-size=${config.browser.windowSize}`);
     }
 
     switch (config.browser.windowMode) {
@@ -297,13 +333,14 @@ class CDPController extends EventEmitter {
   /**
    * Launches the browser with configured tabs and starts rotation
    */
-  async start(config) {
+  async start(config, profileName = 'default') {
     if (this.status === 'running' || this.status === 'starting') {
       console.log('Rotation is already running.');
       return;
     }
 
     this.config = config;
+    this.activeProfileName = profileName || 'default';
     this.status = 'starting';
     this.emitState();
 
@@ -315,8 +352,8 @@ class CDPController extends EventEmitter {
         throw new Error('Cannot start: No URLs are enabled in configuration.');
       }
 
-      console.log(`Launching ${browserInfo.name} from: ${browserInfo.path}`);
-      const args = this.buildBrowserArgs(config);
+      console.log(`[Launch] Starting ${browserInfo.name} for profile "${this.activeProfileName}"`);
+      const args = await this.buildBrowserArgs(config, this.activeProfileName);
 
       // Open initial page
       args.push(enabledUrls[0].url);
@@ -676,6 +713,8 @@ class CDPController extends EventEmitter {
     const currentTab = this.tabs && this.tabs[this.currentIndex] ? this.tabs[this.currentIndex] : null;
     return {
       status: this.status,
+      activeProfileName: this.activeProfileName || 'default',
+      cdpPort: this.port,
       currentIndex: this.currentIndex,
       currentTab: currentTab,
       totalTabs: this.tabs.length,

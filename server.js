@@ -1,11 +1,11 @@
 /**
  * Chrome & Edge Auto Tab Rotator - Local Backend Server
  * Built with pure Node.js (zero external npm dependencies required).
- * Provides REST API, Server-Sent Events (SSE) for real-time UI synchronization,
- * and static file serving.
+ * Supports multi-instance / multi-monitor rotation with automatic port discovery.
  */
 
 const http = require('http');
+const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
@@ -15,8 +15,11 @@ const configManager = require('./config-manager');
 const cdpController = require('./cdp-controller');
 const browserFinder = require('./browser-finder');
 
-const PORT = parseInt(process.env.PORT || '3000', 10);
+const DEFAULT_PORT = parseInt(process.env.PORT || '3000', 10);
 const PUBLIC_DIR = path.join(__dirname, 'public');
+
+let currentServerPort = DEFAULT_PORT;
+let currentProfile = 'default';
 
 // MIME types for static asset serving
 const MIME_TYPES = {
@@ -44,10 +47,31 @@ function broadcastSSE(eventType, data) {
 }
 
 // Hook CDP controller events to SSE broadcaster
-cdpController.on('state-change', (state) => broadcastSSE('state-change', state));
+cdpController.on('state-change', (state) => broadcastSSE('state-change', { ...state, serverPort: currentServerPort, activeProfile: currentProfile }));
 cdpController.on('tick', (tick) => broadcastSSE('tick', tick));
 cdpController.on('tab-switched', (info) => broadcastSSE('tab-switched', info));
 cdpController.on('browser-closed', (info) => broadcastSSE('browser-closed', info));
+
+/**
+ * Finds an available TCP port starting from the given port number
+ */
+function getAvailablePort(startingPort) {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(getAvailablePort(startingPort + 1));
+      } else {
+        reject(err);
+      }
+    });
+    srv.listen(startingPort, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
 
 /**
  * Helper: Parse JSON request body
@@ -148,7 +172,12 @@ const server = http.createServer(async (req, res) => {
         'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*'
       });
-      res.write(`event: state-change\ndata: ${JSON.stringify(cdpController.getStatus())}\n\n`);
+      const statePayload = {
+        ...cdpController.getStatus(),
+        serverPort: currentServerPort,
+        activeProfile: currentProfile
+      };
+      res.write(`event: state-change\ndata: ${JSON.stringify(statePayload)}\n\n`);
       sseClients.add(res);
 
       req.on('close', () => {
@@ -161,22 +190,31 @@ const server = http.createServer(async (req, res) => {
     // API Endpoints
     // -------------------------------------------------------------
 
-    // GET /api/status - Current rotation state
+    // GET /api/status - Current rotation state & instance metadata
     if (pathname === '/api/status' && method === 'GET') {
-      return sendJson(res, 200, cdpController.getStatus());
+      return sendJson(res, 200, {
+        ...cdpController.getStatus(),
+        serverPort: currentServerPort,
+        activeProfile: currentProfile
+      });
     }
 
-    // GET /api/config - Get current saved configuration
+    // GET /api/config - Get current saved configuration for active profile
     if (pathname === '/api/config' && method === 'GET') {
-      const cfg = configManager.loadConfig();
-      return sendJson(res, 200, cfg);
+      const profileToLoad = parsedUrl.query.profile || currentProfile;
+      const cfg = configManager.loadConfig(profileToLoad);
+      return sendJson(res, 200, { ...cfg, activeProfile: profileToLoad });
     }
 
     // POST /api/config - Save configuration
     if (pathname === '/api/config' && method === 'POST') {
       const body = await parseJsonBody(req);
-      const saved = configManager.saveConfig(body);
-      return sendJson(res, 200, { success: true, config: saved });
+      const profileToSave = body.activeProfile || currentProfile;
+      const saved = configManager.saveConfig(body, profileToSave);
+      if (cdpController.status !== 'stopped') {
+        cdpController.updateConfig(saved);
+      }
+      return sendJson(res, 200, { success: true, config: saved, activeProfile: profileToSave });
     }
 
     // GET /api/browsers - Detect available browsers
@@ -188,7 +226,7 @@ const server = http.createServer(async (req, res) => {
     // GET /api/profiles - List profiles
     if (pathname === '/api/profiles' && method === 'GET') {
       const list = configManager.listProfiles();
-      return sendJson(res, 200, { profiles: list });
+      return sendJson(res, 200, { profiles: list, activeProfile: currentProfile });
     }
 
     // POST /api/profiles/save - Save profile
@@ -196,6 +234,7 @@ const server = http.createServer(async (req, res) => {
       const body = await parseJsonBody(req);
       if (!body.name) return sendError(res, 400, 'Profile name is required');
       const result = configManager.saveProfile(body.name, body.config);
+      currentProfile = body.name;
       return sendJson(res, 200, result);
     }
 
@@ -204,7 +243,8 @@ const server = http.createServer(async (req, res) => {
       const body = await parseJsonBody(req);
       if (!body.name) return sendError(res, 400, 'Profile name is required');
       const loaded = configManager.loadProfile(body.name);
-      return sendJson(res, 200, { success: true, config: loaded });
+      currentProfile = body.name;
+      return sendJson(res, 200, { success: true, config: loaded, activeProfile: currentProfile });
     }
 
     // DELETE /api/profiles/:name - Delete profile
@@ -221,11 +261,23 @@ const server = http.createServer(async (req, res) => {
     // POST /api/control/start - Launch & start rotation
     if (pathname === '/api/control/start' && method === 'POST') {
       const body = await parseJsonBody(req);
-      const config = body.config ? configManager.saveConfig(body.config) : configManager.loadConfig();
+      const targetProfile = body.profileName || currentProfile;
+      const config = body.config
+        ? configManager.saveConfig(body.config, targetProfile)
+        : configManager.loadConfig(targetProfile);
+
+      currentProfile = targetProfile;
 
       try {
-        await cdpController.start(config);
-        return sendJson(res, 200, { success: true, status: cdpController.getStatus() });
+        await cdpController.start(config, targetProfile);
+        return sendJson(res, 200, {
+          success: true,
+          status: {
+            ...cdpController.getStatus(),
+            serverPort: currentServerPort,
+            activeProfile: currentProfile
+          }
+        });
       } catch (err) {
         return sendError(res, 500, err.message || 'Failed to start browser rotation');
       }
@@ -305,7 +357,7 @@ function openInBrowser(targetUrl) {
 function parseArgs() {
   const args = process.argv.slice(2);
   const options = {
-    port: PORT,
+    port: DEFAULT_PORT,
     autostart: false,
     profile: null,
     noOpen: false
@@ -313,7 +365,7 @@ function parseArgs() {
 
   for (const arg of args) {
     if (arg.startsWith('--port=')) {
-      options.port = parseInt(arg.split('=')[1], 10) || PORT;
+      options.port = parseInt(arg.split('=')[1], 10) || DEFAULT_PORT;
     } else if (arg === '--autostart') {
       options.autostart = true;
     } else if (arg.startsWith('--profile=')) {
@@ -326,37 +378,45 @@ function parseArgs() {
   return options;
 }
 
-// Start Server
-const options = parseArgs();
-server.listen(options.port, '127.0.0.1', async () => {
-  const serverUrl = `http://localhost:${options.port}`;
-  console.log('====================================================');
-  console.log('🚀 Chrome & Edge Auto Tab Rotator is running!');
-  console.log(`🌐 Control Panel: ${serverUrl}`);
-  console.log('⚡ Ready to rotate tabs (No admin rights required)');
-  console.log('====================================================');
-
+// Start Server with dynamic port discovery
+async function startServer() {
+  const options = parseArgs();
   if (options.profile) {
-    try {
-      console.log(`Loading profile: ${options.profile}...`);
-      configManager.loadProfile(options.profile);
-    } catch (err) {
-      console.error(`Failed to load profile ${options.profile}:`, err.message);
-    }
+    currentProfile = options.profile;
   }
 
-  if (options.autostart) {
-    console.log('Autostart enabled. Launching browser rotation...');
-    try {
-      const cfg = configManager.loadConfig();
-      await cdpController.start(cfg);
-    } catch (err) {
-      console.error('Autostart failed:', err.message);
+  // Find free available port (e.g. 3000, 3001, 3002...)
+  const assignedPort = await getAvailablePort(options.port);
+  currentServerPort = assignedPort;
+
+  server.listen(assignedPort, '127.0.0.1', async () => {
+    const serverUrl = `http://localhost:${assignedPort}`;
+    const instanceNum = assignedPort - DEFAULT_PORT + 1;
+
+    console.log('====================================================');
+    console.log(`🚀 Chrome & Edge Tab Rotator (Instance #${instanceNum})`);
+    console.log(`🌐 Control Panel: ${serverUrl}`);
+    console.log(`📁 Active Profile: "${currentProfile}"`);
+    console.log('⚡ Multi-Screen & Multi-Instance Ready (No admin rights required)');
+    console.log('====================================================');
+
+    if (options.autostart) {
+      console.log(`Autostart enabled for profile "${currentProfile}". Launching browser rotation...`);
+      try {
+        const cfg = configManager.loadConfig(currentProfile);
+        await cdpController.start(cfg, currentProfile);
+      } catch (err) {
+        console.error('Autostart failed:', err.message);
+      }
+    } else if (!options.noOpen) {
+      openInBrowser(serverUrl);
     }
-  } else if (!options.noOpen) {
-    // Open control panel
-    openInBrowser(serverUrl);
-  }
+  });
+}
+
+startServer().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });
 
 // Graceful process exit

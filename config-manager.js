@@ -1,6 +1,6 @@
 /**
  * Configuration & Profile Manager
- * Handles loading, saving, validation, and profile management for Tab Rotator.
+ * Handles loading, saving, validation, and multi-monitor profile management for Tab Rotator.
  * Runs in standard user space without requiring administrative privileges.
  */
 
@@ -17,6 +17,8 @@ const DEFAULT_CONFIG = {
     type: 'auto', // 'auto' | 'chrome' | 'edge' | 'brave' | 'chromium' | 'custom'
     customPath: '',
     windowMode: 'maximized', // 'normal' | 'maximized' | 'fullscreen' | 'kiosk'
+    windowPosition: 'auto', // 'auto' | '0,0' (Screen 1) | '1920,0' (Screen 2) | '3840,0' (Screen 3) | custom 'X,Y'
+    windowSize: 'auto', // 'auto' | '1920,1080' | '2560,1440' | '3840,2160' | custom 'W,H'
     profileMode: 'isolated', // 'isolated' (temporary clean profile) | 'persistent' (saves cookies/logins in local folder)
     customProfilePath: '',
     remoteDebuggingPort: 9222,
@@ -67,6 +69,46 @@ function ensureProfilesDir() {
       console.error('Warning: could not create profiles directory:', err.message);
     }
   }
+
+  // Pre-seed sample Screen 1 and Screen 2 profiles if none exist
+  const screen1Path = path.join(PROFILES_DIR, 'Screen1.json');
+  const screen2Path = path.join(PROFILES_DIR, 'Screen2.json');
+
+  if (!fs.existsSync(screen1Path)) {
+    try {
+      const screen1Config = sanitizeConfig({
+        ...DEFAULT_CONFIG,
+        browser: {
+          ...DEFAULT_CONFIG.browser,
+          windowPosition: '0,0',
+          remoteDebuggingPort: 9222
+        },
+        urls: [
+          { id: 's1_1', title: 'Grafana Dashboard', url: 'https://play.grafana.org', enabled: true, durationSeconds: 15, reloadOnSwitch: true },
+          { id: 's1_2', title: 'System Metrics', url: 'https://news.ycombinator.com', enabled: true, durationSeconds: 15, reloadOnSwitch: false }
+        ]
+      });
+      fs.writeFileSync(screen1Path, JSON.stringify(screen1Config, null, 2), 'utf8');
+    } catch {}
+  }
+
+  if (!fs.existsSync(screen2Path)) {
+    try {
+      const screen2Config = sanitizeConfig({
+        ...DEFAULT_CONFIG,
+        browser: {
+          ...DEFAULT_CONFIG.browser,
+          windowPosition: '1920,0',
+          remoteDebuggingPort: 9223
+        },
+        urls: [
+          { id: 's2_1', title: 'Wikipedia Status', url: 'https://en.wikipedia.org/wiki/Main_Page', enabled: true, durationSeconds: 20, reloadOnSwitch: false },
+          { id: 's2_2', title: 'GitHub Trending', url: 'https://github.com/trending', enabled: true, durationSeconds: 20, reloadOnSwitch: true }
+        ]
+      });
+      fs.writeFileSync(screen2Path, JSON.stringify(screen2Config, null, 2), 'utf8');
+    } catch {}
+  }
 }
 
 /**
@@ -85,6 +127,8 @@ function sanitizeConfig(config) {
       windowMode: ['normal', 'maximized', 'fullscreen', 'kiosk'].includes(config.browser?.windowMode)
         ? config.browser.windowMode
         : 'maximized',
+      windowPosition: typeof config.browser?.windowPosition === 'string' ? config.browser.windowPosition.trim() : 'auto',
+      windowSize: typeof config.browser?.windowSize === 'string' ? config.browser.windowSize.trim() : 'auto',
       profileMode: ['isolated', 'persistent'].includes(config.browser?.profileMode)
         ? config.browser.profileMode
         : 'isolated',
@@ -113,7 +157,6 @@ function sanitizeConfig(config) {
       .filter(item => item && typeof item.url === 'string' && item.url.trim().length > 0)
       .map((item, idx) => {
         let rawUrl = item.url.trim();
-        // Add protocol if missing
         if (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://') && !rawUrl.startsWith('file://')) {
           rawUrl = 'https://' + rawUrl;
         }
@@ -138,21 +181,33 @@ function sanitizeConfig(config) {
 }
 
 /**
- * Loads the active config from disk or returns defaults
+ * Loads config for a profile or default
  */
-function loadConfig() {
+function loadConfig(profileName = null) {
   ensureProfilesDir();
+
+  if (profileName && profileName !== 'default') {
+    const safeName = profileName.replace(/[^a-zA-Z0-9_\-\s]/g, '').trim();
+    const profilePath = path.join(PROFILES_DIR, `${safeName}.json`);
+    if (fs.existsSync(profilePath)) {
+      try {
+        const data = fs.readFileSync(profilePath, 'utf8');
+        return sanitizeConfig(JSON.parse(data));
+      } catch (err) {
+        console.error(`Error reading profile ${profileName}:`, err.message);
+      }
+    }
+  }
+
   if (fs.existsSync(CONFIG_FILE)) {
     try {
       const data = fs.readFileSync(CONFIG_FILE, 'utf8');
-      const parsed = JSON.parse(data);
-      return sanitizeConfig(parsed);
+      return sanitizeConfig(JSON.parse(data));
     } catch (err) {
       console.error('Error reading config.json, using defaults:', err.message);
     }
   }
 
-  // Save default config
   const initial = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
   saveConfig(initial);
   return initial;
@@ -161,8 +216,17 @@ function loadConfig() {
 /**
  * Saves config to disk
  */
-function saveConfig(config) {
+function saveConfig(config, profileName = null) {
+  ensureProfilesDir();
   const sanitized = sanitizeConfig(config);
+
+  if (profileName && profileName !== 'default') {
+    const safeName = profileName.replace(/[^a-zA-Z0-9_\-\s]/g, '').trim();
+    const targetPath = path.join(PROFILES_DIR, `${safeName}.json`);
+    fs.writeFileSync(targetPath, JSON.stringify(sanitized, null, 2), 'utf8');
+    return sanitized;
+  }
+
   try {
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(sanitized, null, 2), 'utf8');
     return sanitized;
@@ -231,7 +295,6 @@ function loadProfile(name) {
   const data = fs.readFileSync(targetPath, 'utf8');
   const parsed = JSON.parse(data);
   const sanitized = sanitizeConfig(parsed);
-  saveConfig(sanitized); // set as active config
   return sanitized;
 }
 
