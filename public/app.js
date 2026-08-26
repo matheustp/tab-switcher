@@ -56,9 +56,14 @@ const el = {
   customPathGroup: document.getElementById('customPathGroup'),
   customBrowserPath: document.getElementById('customBrowserPath'),
   windowMode: document.getElementById('windowMode'),
+  windowPosition: document.getElementById('windowPosition'),
+  customPositionInput: document.getElementById('customPositionInput'),
+  windowSize: document.getElementById('windowSize'),
+  customSizeInput: document.getElementById('customSizeInput'),
   profileMode: document.getElementById('profileMode'),
   debugPort: document.getElementById('debugPort'),
   detectedBrowserNote: document.getElementById('detectedBrowserNote'),
+  instanceBadge: document.getElementById('instanceBadge'),
 
   // Profiles
   profileSelect: document.getElementById('profileSelect'),
@@ -216,18 +221,56 @@ function populateFormFromConfig(cfg) {
   el.customBrowserPath.value = cfg.browser.customPath || '';
   el.customPathGroup.style.display = cfg.browser.type === 'custom' ? 'block' : 'none';
   el.windowMode.value = cfg.browser.windowMode || 'maximized';
+
+  // Window Position
+  const pos = cfg.browser.windowPosition || 'auto';
+  const standardPositions = ['auto', '0,0', '1920,0', '-1920,0', '3840,0'];
+  if (standardPositions.includes(pos)) {
+    el.windowPosition.value = pos;
+    el.customPositionInput.style.display = 'none';
+    el.customPositionInput.value = '';
+  } else {
+    el.windowPosition.value = 'custom';
+    el.customPositionInput.style.display = 'block';
+    el.customPositionInput.value = pos;
+  }
+
+  // Window Size
+  const sz = cfg.browser.windowSize || 'auto';
+  const standardSizes = ['auto', '1920,1080', '2560,1440', '3840,2160'];
+  if (standardSizes.includes(sz)) {
+    el.windowSize.value = sz;
+    el.customSizeInput.style.display = 'none';
+    el.customSizeInput.value = '';
+  } else {
+    el.windowSize.value = 'custom';
+    el.customSizeInput.style.display = 'block';
+    el.customSizeInput.value = sz;
+  }
+
   el.profileMode.value = cfg.browser.profileMode || 'isolated';
   el.debugPort.value = cfg.browser.remoteDebuggingPort || 9222;
 }
 
 function readConfigFromForm() {
+  const windowPosVal = el.windowPosition.value === 'custom'
+    ? (el.customPositionInput.value.trim() || 'auto')
+    : el.windowPosition.value;
+
+  const windowSizeVal = el.windowSize.value === 'custom'
+    ? (el.customSizeInput.value.trim() || 'auto')
+    : el.windowSize.value;
+
   return {
     ...currentConfig,
+    activeProfile: el.profileSelect.value,
     browser: {
       ...currentConfig.browser,
       type: el.browserType.value,
       customPath: el.customBrowserPath.value.trim(),
       windowMode: el.windowMode.value,
+      windowPosition: windowPosVal,
+      windowSize: windowSizeVal,
       profileMode: el.profileMode.value,
       remoteDebuggingPort: parseInt(el.debugPort.value, 10) || 9222
     },
@@ -263,9 +306,12 @@ async function saveCurrentConfig(silent = false) {
 function updateStatusUI(status) {
   currentStatus = { ...currentStatus, ...status };
 
-  // Status Badge
+  // Status Badge & Instance Port
   el.statusDot.className = `status-dot status-${status.status}`;
   el.statusText.textContent = status.status.toUpperCase();
+  if (status.serverPort && el.instanceBadge) {
+    el.instanceBadge.textContent = `Port :${status.serverPort}`;
+  }
 
   // Control Buttons
   const isRunning = status.status === 'running';
@@ -582,9 +628,11 @@ function setupEventListeners() {
   });
 
   // Form controls change auto-save
-  [el.rotationOrder, el.chkLoop, el.chkReloadOnSwitch, el.browserType, el.customBrowserPath, el.windowMode, el.profileMode, el.debugPort].forEach(input => {
+  [el.rotationOrder, el.chkLoop, el.chkReloadOnSwitch, el.browserType, el.customBrowserPath, el.windowMode, el.windowPosition, el.customPositionInput, el.windowSize, el.customSizeInput, el.profileMode, el.debugPort].forEach(input => {
     input.addEventListener('change', () => {
       el.customPathGroup.style.display = el.browserType.value === 'custom' ? 'block' : 'none';
+      el.customPositionInput.style.display = el.windowPosition.value === 'custom' ? 'block' : 'none';
+      el.customSizeInput.style.display = el.windowSize.value === 'custom' ? 'block' : 'none';
       saveCurrentConfig(true);
     });
   });

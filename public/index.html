@@ -29,7 +29,7 @@
           </svg>
         </div>
         <div class="header-titles">
-          <h1>Tab Rotator <span class="badge badge-platform">Windows / Chrome & Edge</span></h1>
+          <h1>Tab Rotator <span class="badge badge-platform">Chrome & Edge</span> <span class="badge badge-instance" id="instanceBadge">Port :3000</span></h1>
           <p class="subtitle">Automated browser tab switcher with custom intervals</p>
         </div>
       </div>
@@ -241,6 +241,32 @@
             </div>
 
             <div class="form-group">
+              <label for="windowPosition">Target Screen / Monitor Position:</label>
+              <select id="windowPosition" class="select-input">
+                <option value="auto">Auto (Default Screen)</option>
+                <option value="0,0">Screen 1 / Primary (0, 0)</option>
+                <option value="1920,0">Screen 2 / Right (1920, 0)</option>
+                <option value="-1920,0">Screen 2 / Left (-1920, 0)</option>
+                <option value="3840,0">Screen 3 / Right (3840, 0)</option>
+                <option value="custom">Custom Coordinates (X,Y)</option>
+              </select>
+              <input type="text" id="customPositionInput" class="text-input" placeholder="X,Y (e.g. 1920,0)" style="display: none; margin-top: 6px;">
+              <div class="field-hint">Positions window on a specific monitor in multi-display setups</div>
+            </div>
+
+            <div class="form-group">
+              <label for="windowSize">Window Dimensions:</label>
+              <select id="windowSize" class="select-input">
+                <option value="auto">Auto (Default Size)</option>
+                <option value="1920,1080">Full HD (1920 × 1080)</option>
+                <option value="2560,1440">2K QHD (2560 × 1440)</option>
+                <option value="3840,2160">4K UHD (3840 × 2160)</option>
+                <option value="custom">Custom Dimensions (W,H)</option>
+              </select>
+              <input type="text" id="customSizeInput" class="text-input" placeholder="Width,Height (e.g. 1920,1080)" style="display: none; margin-top: 6px;">
+            </div>
+
+            <div class="form-group">
               <label for="profileMode">Session / Profile Mode:</label>
               <select id="profileMode" class="select-input">
                 <option value="isolated">Clean Isolated Session (Temporary)</option>
@@ -251,6 +277,7 @@
             <div class="form-group">
               <label for="debugPort">DevTools Port:</label>
               <input type="number" id="debugPort" class="number-input" value="9222" min="1024" max="65535">
+              <div class="field-hint">Auto-allocated if multiple instances run concurrently</div>
             </div>
 
           </div>
@@ -259,11 +286,11 @@
         <!-- Quick Help & Autostart Info -->
         <div class="card card-accent-info">
           <div class="card-body">
-            <h4>💡 Quick Tips & Windows Autostart</h4>
+            <h4>💡 Multi-Screen & Multi-Instance Setup</h4>
             <p class="help-text">
-              • <strong>No Admin Rights:</strong> Tab Rotator runs in user space.<br>
-              • <strong>Kiosk Mode:</strong> Ideal for TV screens and dashboard monitors.<br>
-              • <strong>Autostart on Boot:</strong> Run <code>start.bat --autostart</code> in your Windows Startup folder (<code>shell:startup</code>).
+              • <strong>Multi-Screen:</strong> Double-click <code>start.bat</code> again to open another instance for your second monitor.<br>
+              • <strong>Dual-Screen One-Click:</strong> Run <code>start-multi-screen.bat</code> to launch Screen 1 & Screen 2 simultaneously.<br>
+              • <strong>Profile Isolation:</strong> Each profile (e.g. <code>Screen1</code>, <code>Screen2</code>) runs in its own independent browser window.
             </p>
           </div>
         </div>
